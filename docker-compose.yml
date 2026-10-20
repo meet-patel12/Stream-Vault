@@ -1,0 +1,76 @@
+services:
+  postgres:
+    image: postgres:16-alpine
+    container_name: netflix-postgres
+    restart: unless-stopped
+    environment:
+      POSTGRES_DB: netflix
+      POSTGRES_USER: postgres
+      POSTGRES_PASSWORD: password
+    ports:
+      - "5432:5432"
+    volumes:
+      - pgdata:/var/lib/postgresql/data
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U postgres"]
+      interval: 5s
+      timeout: 5s
+      retries: 5
+
+  redis:
+    image: redis:7-alpine
+    container_name: netflix-redis
+    restart: unless-stopped
+    ports:
+      - "6379:6379"
+
+  media-server:
+    build:
+      context: ./media_server
+      dockerfile: Dockerfile
+    container_name: netflix-media-server
+    restart: unless-stopped
+    environment:
+      DATABASE_URL: postgresql://postgres:password@postgres:5432/netflix
+      REDIS_URL: redis://redis:6379/0
+    depends_on:
+      postgres:
+        condition: service_healthy
+      redis:
+        condition: service_started
+    volumes:
+      - ./public/stream_assets:/app/public/stream_assets
+      - ./uploads:/app/uploads
+    ports:
+      - "8000:8000"
+
+  client-admin:
+    build:
+      context: .
+      dockerfile: Dockerfile
+    container_name: netflix-client-admin
+    restart: unless-stopped
+    environment:
+      DATABASE_URL: postgresql://postgres:password@postgres:5432/netflix
+      NODE_ENV: production
+    depends_on:
+      postgres:
+        condition: service_healthy
+    ports:
+      - "3000:3000"
+
+  nginx:
+    image: nginx:alpine
+    container_name: netflix-nginx
+    restart: unless-stopped
+    ports:
+      - "80:80"
+    volumes:
+      - ./nginx/nginx.conf:/etc/nginx/nginx.conf:ro
+      - ./public/stream_assets:/var/www/stream_assets:ro
+    depends_on:
+      - client-admin
+      - media-server
+
+volumes:
+  pgdata:
